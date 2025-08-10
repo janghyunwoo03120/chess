@@ -1,0 +1,112 @@
+.tile {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.piece {
+  width: 80% !important;
+  height: 80% !important;
+  object-fit: contain;
+}
+
+.tile.light {
+  background-color: #D3D3D3 !important;
+}
+
+.tile.dark {
+  background-color: transparent !important;
+}
+
+/* 💡 선택된 칸 - 최우선 스타일 */
+.tile.highlighted {
+  background-color: yellow !important;
+  box-shadow: inset 0 0 0 3px #FFD700 !important;
+}
+
+/* 💡 마지막 이동 하이라이트 - 노란색 테두리와 연한 배경 */
+.tile.last-move {
+  box-shadow: inset 0 0 0 3px #FFD700 !important;
+}
+
+.tile.last-move.light {
+  background-color: rgba(255, 215, 0, 0.3) !important;
+}
+
+.tile.last-move.dark {
+  background-color: rgba(255, 215, 0, 0.2) !important;
+}
+
+/* 이동 가능 위치 - 초록 ✔ 표시만, 배경색은 부모(tile.light/dark)가 유지 */
+.tile.move-highlight {
+  position: relative;
+  /* 배경색 설정 없음 (상속됨) */
+}
+
+.tile.move-highlight::after {
+  content: '✔';
+  color: green;
+  font-size: 28px;
+  font-weight: bold;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  user-select: none;
+}
+
+.tile .piece[src*="white"] {
+  transform: rotate(180deg);
+}
+
+.piece.white {
+  transform: rotate(180deg);
+}
+
+/* 말 이미지 */
+.tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.piece {
+  width: 100%;
+  height: 100%;
+  transition: transform 0.2s ease-in-out;
+}
+
+/* 이동 시 점프 애니메이션 */
+.piece.jump {
+  animation: bounce 0.4s ease-in-out;
+  animation-delay: 0s;
+  animation-fill-mode: forwards;
+}
+
+.piece:not(.jump) {
+  animation: none !important;
+}
+
+/* 점프 애니메이션 정의 */
+@keyframes bounce {
+  0%   { transform: translateY(0); }
+  30%  { transform: translateY(-25px); }
+  50%  { transform: translateY(0); }
+  70%  { transform: translateY(-10px); }
+  100% { transform: translateY(0); }
+}
+
+/* 💡 우선순위 보장: highlighted > last-move > move-highlight */
+/*  .tile.highlighted {
+    /* 선택된 칸이 최우선이므로 다른 스타일을 덮어씀 */
+/*  }
+
+/* 💡 마지막 이동과 이동 가능 위치가 겹칠 때 처리 */
+.tile.last-move.move-highlight::after {
+  /* 마지막 이동 칸에서도 체크마크가 보이도록 */
+  z-index: 10;
+}

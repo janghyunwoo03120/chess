@@ -1,0 +1,231 @@
+.boards-container {
+  display: flex;
+  justify-content: space-evenly;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+
+  gap: 308px; /* 보드판 사이 간격을 명확히 줌 */
+}
+
+.board-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  
+}
+
+/* 타이머 스타일 */
+.timer {
+  font-size: 1.1rem;
+  font-weight: bold;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  min-width: 120px;
+  text-align: center;
+}
+
+.white-timer {
+  background-color: rgba(255, 255, 255, 0.85);
+  color: black;
+}
+
+.black-timer {
+  background-color: rgba(0, 0, 0, 0.85);
+  color: white;
+}
+
+/* 관점 라벨 */
+.perspective-label {
+  font-weight: bold;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.white-perspective {
+  background: #667eea;
+  color: white;
+}
+
+.black-perspective {
+  background: #333;
+  color: white;
+}
+
+/* 기존 보드 스타일 - 크기 정상화 */
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, 70px);
+  width: 560px;
+  height: 560px;
+  margin: 0 auto;
+  position: relative;
+  border: 3px solid #8B4513;
+  border-radius: 8px;
+}
+
+.board::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 5px;
+}
+
+.tile {
+  position: relative;
+  z-index: 1;
+}
+
+.tile.light {
+  background-color: rgba(211, 211, 211, 0.8) !important;
+}
+
+.tile.dark {
+  background-color: transparent !important;
+}
+
+/* 선택된 칸 표시 */
+.highlighted {
+  background-color: rgba(255, 255, 0, 0.6) !important;
+  box-shadow: inset 0 0 0 3px #FFD700;
+}
+
+/* 이동 가능한 칸 표시 */
+.move-highlight {
+  background-color: rgba(144, 238, 144, 0.4) !important;
+  position: relative;
+}
+
+.move-highlight::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #228B22;
+  font-size: 24px;
+  font-weight: bold;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* 말 스타일 */
+.piece {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+}
+
+.piece.jump {
+  animation: jump 0.4s ease-out;
+}
+
+@keyframes jump {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-10px) scale(1.1); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* 반응형 - 큰 화면 */
+@media (min-width: 1400px) {
+  .boards-container {
+    padding: 0 5%;
+  }
+  
+  .board {
+    grid-template-columns: repeat(8, 80px);
+    width: 640px;
+    height: 640px;
+  }
+  .piece {
+    width: 70px;
+    height: 70px;
+  }
+  
+  .move-highlight::after {
+    font-size: 28px;
+  }
+}
+
+/* 반응형 - 중간 화면 */
+@media (max-width: 1200px) {
+  .boards-container {
+    padding: 0 4%;
+  }
+    
+  .board {
+    grid-template-columns: repeat(8, 65px);
+    width: 520px;
+    height: 520px;
+  }
+  .piece {
+    width: 55px;
+    height: 55px;
+  }
+    
+  .move-highlight::after {
+    font-size: 22px;
+  }
+}
+
+/* 반응형 - 작은 화면 */
+@media (max-width: 900px) {
+  .boards-container {
+    flex-direction: column;
+    gap: 30px;
+    padding: 0 2%;
+  }
+    
+  .board {
+    grid-template-columns: repeat(8, 55px);
+    width: 440px;
+    height: 440px;
+  }
+  .piece {
+    width: 45px;
+    height: 45px;
+  }
+    
+  .move-highlight::after {
+    font-size: 18px;
+  }
+}
+
+/* 반응형 - 매우 작은 화면 */
+@media (max-width: 768px) {
+  .board {
+    grid-template-columns: repeat(8, 45px);
+    width: 360px;
+    height: 360px;
+  }
+  .piece {
+    width: 38px;
+    height: 38px;
+  }
+    
+  .move-highlight::after {
+    font-size: 16px;
+  }
+    
+  .timer {
+    font-size: 1rem;
+    padding: 6px 10px;
+    min-width: 100px;
+  }
+    
+  .perspective-label {
+    font-size: 0.9rem;
+    padding: 4px 8px;
+  }
+}

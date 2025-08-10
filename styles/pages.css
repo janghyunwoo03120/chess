@@ -1,0 +1,170 @@
+/* src/styles/pages.css - 페이지들에 공통으로 적용할 스타일 */
+
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  min-height: calc(100vh - 100px);
+}
+
+.content {
+  margin-top: 2rem;
+}
+
+/* 게임 소개 페이지 */
+.page-container h1 {
+  color: #333;
+  border-bottom: 3px solid #667eea;
+  padding-bottom: 1rem;
+  margin-bottom: 2rem;
+}
+
+.page-container h2, .page-container h3 {
+  color: #555;
+  margin-top: 2rem;
+}
+
+.page-container ul {
+  margin: 1rem 0;
+  padding-left: 2rem;
+}
+
+.page-container li {
+  margin-bottom: 0.5rem;
+}
+
+/* 문의 페이지 */
+.inquiry-info {
+  background: #f8f9fa;
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+}
+
+.inquiry-form {
+  max-width: 600px;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #e1e5e9;
+  border-radius: 4px;
+  font-size: 1rem;
+  transition: border-color 0.3s;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.submit-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 1rem 2rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: opacity 0.3s;
+}
+
+.submit-btn:hover {
+  opacity: 0.9;
+}
+
+/* 인증 페이지 */
+.auth-container {
+  max-width: 400px;
+  margin: 2rem auto;
+}
+
+.auth-toggle {
+  display: flex;
+  margin-bottom: 2rem;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.auth-toggle button {
+  flex: 1;
+  padding: 1rem;
+  border: none;
+  background: #f8f9fa;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.auth-toggle button.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.auth-form {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+}
+
+.auth-form h2 {
+  text-align: center;
+  margin-bottom: 2rem;
+  color: #333;
+}
+
+.auth-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: opacity 0.3s;
+}
+
+.auth-btn:hover {
+  opacity: 0.9;
+}
+
+/* Navbar 추가 스타일 */
+.brand-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.brand-link:hover {
+  text-decoration: none;
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+  .page-container {
+    padding: 1rem;
+  }
+  
+  .auth-container {
+    margin: 1rem;
+  }
+  
+  .inquiry-form {
+    max-width: 100%;
+  }
+}
