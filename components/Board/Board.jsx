@@ -542,4 +542,4 @@ return (
 );
 };
 
-export default Board;d
+export default Board;
