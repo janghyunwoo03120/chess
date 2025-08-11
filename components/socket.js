@@ -1,4 +1,4 @@
-// socket.js - 클라이언트 소켓 연결
+// socket.js - 클라이언트 소켓 연결 (수정된 버전)
 import { io } from 'socket.io-client';
 
 const SERVER_URL = 'http://localhost:3001';
@@ -7,59 +7,96 @@ class ChessSocketClient {
   constructor() {
     this.socket = null;
     this.isConnected = false;
+    this.isConnecting = false;
     this.roomCode = null;
     this.playerName = null;
     this.playerColor = null;
     this.callbacks = {};
+    this.eventListenersSetup = false;
   }
 
   // 서버 연결
   connect() {
-    if (this.socket) {
-      this.disconnect();
+    if (this.isConnecting || this.isConnected) {
+      console.log('이미 연결 중이거나 연결되어 있습니다');
+      return Promise.resolve(this.socket);
     }
 
-    this.socket = io(SERVER_URL, {
-      transports: ['websocket', 'polling'],
-      timeout: 20000,
-    });
+    return new Promise((resolve, reject) => {
+      this.isConnecting = true;
+      
+      if (this.socket) {
+        this.socket.removeAllListeners();
+        this.socket.disconnect();
+      }
 
-    this.setupEventListeners();
-    return this.socket;
+      this.socket = io(SERVER_URL, {
+        transports: ['websocket', 'polling'],
+        timeout: 20000,
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 5,
+        forceNew: true
+      });
+
+      // 연결 성공 시
+      this.socket.once('connect', () => {
+        console.log('서버에 연결되었습니다:', this.socket.id);
+        this.isConnected = true;
+        this.isConnecting = false;
+        this.setupEventListeners();
+        this.emit('connected', { socketId: this.socket.id });
+        resolve(this.socket);
+      });
+
+      // 연결 실패 시
+      this.socket.once('connect_error', (error) => {
+        console.error('서버 연결 실패:', error);
+        this.isConnected = false;
+        this.isConnecting = false;
+        this.emit('connection-error', { error: error.message });
+        reject(error);
+      });
+
+      // 타임아웃 처리
+      setTimeout(() => {
+        if (this.isConnecting) {
+          this.isConnecting = false;
+          reject(new Error('연결 시간 초과'));
+        }
+      }, 10000);
+    });
   }
 
   // 연결 해제
   disconnect() {
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
     }
     this.isConnected = false;
+    this.isConnecting = false;
     this.roomCode = null;
     this.playerName = null;
     this.playerColor = null;
+    this.eventListenersSetup = false;
   }
 
-  // 이벤트 리스너 설정
+  // 이벤트 리스너 설정 (한 번만 실행)
   setupEventListeners() {
-    // 연결 성공
-    this.socket.on('connect', () => {
-      console.log('서버에 연결되었습니다:', this.socket.id);
-      this.isConnected = true;
-      this.emit('connected', { socketId: this.socket.id });
-    });
+    if (this.eventListenersSetup || !this.socket) {
+      return;
+    }
 
-    // 연결 실패
-    this.socket.on('connect_error', (error) => {
-      console.error('서버 연결 실패:', error);
-      this.isConnected = false;
-      this.emit('connection-error', { error: error.message });
-    });
+    this.eventListenersSetup = true;
 
     // 연결 해제
     this.socket.on('disconnect', (reason) => {
       console.log('서버 연결이 해제되었습니다:', reason);
       this.isConnected = false;
+      this.isConnecting = false;
+      this.eventListenersSetup = false;
       this.emit('disconnected', { reason });
     });
 
@@ -82,9 +119,9 @@ class ChessSocketClient {
     });
 
     // 방 참가 실패
-    this.socket.on('join-error', (message) => {
-      console.error('방 참가 실패:', message);
-      this.emit('join-error', { message });
+    this.socket.on('join-error', (data) => {
+      console.error('방 참가 실패:', data);
+      this.emit('join-error', data);
     });
 
     // 상대방 참가
@@ -126,31 +163,71 @@ class ChessSocketClient {
       console.log('상대방이 연결을 해제했습니다');
       this.emit('opponent-disconnected');
     });
+
+    // 재연결 시도
+    this.socket.on('reconnect', (attemptNumber) => {
+      console.log('재연결 성공:', attemptNumber);
+      this.isConnected = true;
+      this.emit('reconnected', { attemptNumber });
+    });
+
+    // 재연결 실패
+    this.socket.on('reconnect_failed', () => {
+      console.log('재연결 실패');
+      this.isConnected = false;
+      this.emit('reconnect-failed');
+    });
+  }
+
+  // 연결 상태 확인 및 자동 재연결
+  async ensureConnected() {
+    if (this.isConnected && this.socket && this.socket.connected) {
+      return true;
+    }
+
+    if (this.isConnecting) {
+      // 연결 중이면 잠시 대기
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return this.isConnected;
+    }
+
+    try {
+      await this.connect();
+      return true;
+    } catch (error) {
+      console.error('연결 실패:', error);
+      return false;
+    }
   }
 
   // 방 생성
-  createRoom(playerName) {
-    if (!this.isConnected) {
-      console.error('서버에 연결되지 않았습니다');
-      return;
+  async createRoom(playerName) {
+    if (!(await this.ensureConnected())) {
+      this.emit('connection-error', { error: '서버에 연결할 수 없습니다' });
+      return false;
     }
+    
     this.socket.emit('create-room', playerName);
+    return true;
   }
 
   // 방 참가
-  joinRoom(roomCode, playerName) {
-    if (!this.isConnected) {
-      console.error('서버에 연결되지 않았습니다');
-      return;
+  async joinRoom(roomCode, playerName) {
+    if (!(await this.ensureConnected())) {
+      this.emit('connection-error', { error: '서버에 연결할 수 없습니다' });
+      return false;
     }
+    
+    console.log('방 참가 요청:', { roomCode, playerName });
     this.socket.emit('join-room', { roomCode, playerName });
+    return true;
   }
 
   // 말 이동
-  makeMove(move, newBoard, currentTurn, gameStatus) {
-    if (!this.isConnected || !this.roomCode) {
-      console.error('방에 참가하지 않았습니다');
-      return;
+  async makeMove(move, newBoard, currentTurn, gameStatus) {
+    if (!(await this.ensureConnected()) || !this.roomCode) {
+      console.error('방에 참가하지 않았거나 연결되지 않았습니다');
+      return false;
     }
     
     this.socket.emit('make-move', {
@@ -160,23 +237,27 @@ class ChessSocketClient {
       currentTurn,
       gameStatus
     });
+    return true;
   }
 
   // 게임 상태 동기화
-  syncGameState(gameState) {
-    if (!this.isConnected || !this.roomCode) return;
+  async syncGameState(gameState) {
+    if (!(await this.ensureConnected()) || !this.roomCode) {
+      return false;
+    }
     
     this.socket.emit('sync-game-state', {
       roomCode: this.roomCode,
       gameState
     });
+    return true;
   }
 
   // 채팅 메시지 전송
-  sendChatMessage(message) {
-    if (!this.isConnected || !this.roomCode) {
-      console.error('방에 참가하지 않았습니다');
-      return;
+  async sendChatMessage(message) {
+    if (!(await this.ensureConnected()) || !this.roomCode) {
+      console.error('방에 참가하지 않았거나 연결되지 않았습니다');
+      return false;
     }
     
     this.socket.emit('chat-message', {
@@ -184,19 +265,31 @@ class ChessSocketClient {
       message,
       playerName: this.playerName
     });
+    return true;
   }
 
   // 게임 포기
-  surrender() {
-    if (!this.isConnected || !this.roomCode) {
-      console.error('방에 참가하지 않았습니다');
-      return;
+  async surrender() {
+    if (!(await this.ensureConnected()) || !this.roomCode) {
+      console.error('방에 참가하지 않았거나 연결되지 않았습니다');
+      return false;
     }
     
     this.socket.emit('surrender', {
       roomCode: this.roomCode,
       playerName: this.playerName
     });
+    return true;
+  }
+
+  // 방 나가기
+  leaveRoom() {
+    if (this.roomCode && this.socket && this.isConnected) {
+      this.socket.emit('leave-room', { roomCode: this.roomCode });
+    }
+    this.roomCode = null;
+    this.playerName = null;
+    this.playerColor = null;
   }
 
   // 이벤트 콜백 등록
@@ -218,6 +311,11 @@ class ChessSocketClient {
     }
   }
 
+  // 모든 콜백 제거
+  removeAllListeners() {
+    this.callbacks = {};
+  }
+
   // 이벤트 발생
   emit(event, data) {
     if (this.callbacks[event]) {
@@ -235,10 +333,12 @@ class ChessSocketClient {
   getStatus() {
     return {
       isConnected: this.isConnected,
+      isConnecting: this.isConnecting,
       roomCode: this.roomCode,
       playerName: this.playerName,
       playerColor: this.playerColor,
-      socketId: this.socket?.id || null
+      socketId: this.socket?.id || null,
+      socketConnected: this.socket?.connected || false
     };
   }
 }
