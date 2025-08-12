@@ -154,53 +154,11 @@ const OnlineFriendMode = () => {
       });
 
       // 게임 시작
-      // 게임 시작 이벤트 핸들러 부분만 수정
-      // OnlineFriendMode.jsx에서 game-start 이벤트 핸들러 부분만 수정
-
-// 게임 시작 이벤트 핸들러
       newSocket.on('game-start', (data) => {
         console.log('게임 시작:', data);
         setGameState('playing');
-        
-        // 모드별로 올바른 체스판 경로로 이동
-        let gameRoute;
-        
-        switch(mode) {
-          case 'classic':
-          case 'online-friend':
-            gameRoute = '/chess/game/classic';
-            break;
-          case 'random-online':
-            gameRoute = '/chess/game/random';
-            break;
-          case 'special-random':
-            gameRoute = '/chess/game/special-random';
-            break;
-          case 'random2':
-            gameRoute = '/chess/game/random2';
-            break;
-          case 'special-random2':
-            gameRoute = '/chess/game/special-random2';
-            break;
-          case 'balance-online':
-          case 'balance':
-            gameRoute = '/chess/game/balance';
-            break;
-          case 'pro-balance':
-            gameRoute = '/chess/game/pro-balance';
-            break;
-          case 'blitz':
-          case 'bullet':
-          case 'classic-time':
-          case 'online-timeattack':
-            gameRoute = '/chess/game/timeattack';
-            break;
-          default:
-            gameRoute = '/chess/game/classic';
-        }
-        
         // 체스 게임으로 이동
-        navigate(gameRoute, { 
+        navigate('/chess/game', { 
           state: { 
             mode: 'online',
             gameMode: mode,

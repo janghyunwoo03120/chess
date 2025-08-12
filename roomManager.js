@@ -1,13 +1,62 @@
 // roomManager.js
 class Room {
-  constructor(roomCode, hostId, hostName) {
+  constructor(roomCode, hostId, hostName, gameMode = 'normal') {
     this.roomCode = roomCode;
+    this.gameMode = gameMode; // 게임 모드 추가
     this.players = {
       white: { id: hostId, name: hostName }, // 방장은 백색
       black: null // 참가자는 흑색
     };
     this.gameState = 'waiting'; // waiting, playing, finished
     this.createdAt = new Date();
+    this.gameConfig = this.getGameConfig(gameMode); // 모드별 설정
+  }
+
+  // 모드별 게임 설정 반환
+  getGameConfig(mode) {
+    const configs = {
+      normal: {
+        timeLimit: null,
+        specialRules: [],
+        description: '일반 체스 규칙'
+      },
+      random: {
+        timeLimit: null,
+        specialRules: ['randomStart'],
+        description: '랜덤 시작 위치'
+      },
+      'special-random': {
+        timeLimit: null,
+        specialRules: ['randomStart', 'specialPieces'],
+        description: '특수 말과 랜덤 시작'
+      },
+      balance: {
+        timeLimit: null,
+        specialRules: ['balanced'],
+        description: '균형잡힌 게임'
+      },
+      'pro-balance': {
+        timeLimit: null,
+        specialRules: ['balanced', 'advanced'],
+        description: '고급 균형 모드'
+      },
+      blitz: {
+        timeLimit: 300, // 5분
+        specialRules: [],
+        description: '5분 블리츠'
+      },
+      bullet: {
+        timeLimit: 60, // 1분
+        specialRules: [],
+        description: '1분 불릿'
+      },
+      classic: {
+        timeLimit: 1800, // 30분
+        specialRules: [],
+        description: '30분 클래식'
+      }
+    };
+    return configs[mode] || configs.normal;
   }
 
   // 참가자 추가
@@ -81,8 +130,8 @@ class RoomManager {
     return result;
   }
 
-  // 방 생성
-  createRoom(hostId, hostName) {
+  // 방 생성 (모드 지원 추가)
+  createRoom(hostId, hostName, gameMode = 'normal') {
     // 기존에 방에 있다면 제거
     this.removePlayerFromRoom(hostId);
 
@@ -91,11 +140,11 @@ class RoomManager {
       roomCode = this.generateRoomCode();
     } while (this.rooms.has(roomCode)); // 중복 방지
 
-    const room = new Room(roomCode, hostId, hostName);
+    const room = new Room(roomCode, hostId, hostName, gameMode);
     this.rooms.set(roomCode, room);
     this.playerToRoom.set(hostId, roomCode);
 
-    console.log(`방 생성: ${roomCode} (총 ${this.rooms.size}개 방)`);
+    console.log(`방 생성: ${roomCode} (모드: ${gameMode}, 총 ${this.rooms.size}개 방)`);
     return roomCode;
   }
 
@@ -117,7 +166,7 @@ class RoomManager {
 
     if (room.addPlayer(playerId, playerName)) {
       this.playerToRoom.set(playerId, roomCode);
-      console.log(`${playerName}이 방 ${roomCode}에 참가`);
+      console.log(`${playerName}이 방 ${roomCode}에 참가 (모드: ${room.gameMode})`);
       return room;
     }
 
@@ -159,7 +208,9 @@ class RoomManager {
     for (const [roomCode, room] of this.rooms) {
       roomList.push({
         roomCode,
+        gameMode: room.gameMode,
         gameState: room.gameState,
+        gameConfig: room.gameConfig,
         players: {
           white: room.players.white?.name || null,
           black: room.players.black?.name || null
@@ -172,11 +223,22 @@ class RoomManager {
 
   // 통계 정보
   getStats() {
+    const rooms = Array.from(this.rooms.values());
+    const modeStats = {};
+    
+    rooms.forEach(room => {
+      if (!modeStats[room.gameMode]) {
+        modeStats[room.gameMode] = 0;
+      }
+      modeStats[room.gameMode]++;
+    });
+
     return {
       totalRooms: this.rooms.size,
       activePlayers: this.playerToRoom.size,
-      waitingRooms: Array.from(this.rooms.values()).filter(room => room.gameState === 'waiting').length,
-      playingRooms: Array.from(this.rooms.values()).filter(room => room.gameState === 'playing').length
+      waitingRooms: rooms.filter(room => room.gameState === 'waiting').length,
+      playingRooms: rooms.filter(room => room.gameState === 'playing').length,
+      modeStats
     };
   }
 }

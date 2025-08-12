@@ -1,6 +1,6 @@
+// components/Board/ClassicBoard.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import io from 'socket.io-client';
 import Tile from '../Tile/Tile';
 import './Board.css';
 import { isKingInCheck, isCheckmate, isStalemate, isKingAlive } from '../game.logic';
@@ -10,19 +10,33 @@ import { initialBoard } from './boardUtils';
 import { handleMove, isValidMove, getLegalMoves } from './moveLogic';
 import PromotionModal from './PromotionModal';
 import { playMoveSound, playCheckSound, playCheckmateSound, playStalemateSound, playGameOverSound } from './sound';
+import socketManager from '../SocketManager';
+import {
+  validateOnlineMove,
+  updateGameState,
+  createMoveData,
+  applyOpponentMove,
+  createSyncData,
+  transformCoordinatesForPlayer,
+  transformHighlightsForPlayer,
+  transformLastMoveForPlayer,
+  getInitialOnlineGameState,
+  getConnectionStatusMessage
+} from '../OnlineGameLogic';
 
 const ClassicBoard = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const socketRef = useRef(null);
   
-  // location.state에서 온라인 게임 정보 가져오기
-  const onlineGameData = location.state || {};
-  const isOnlineGame = onlineGameData.mode === 'online';
-  const playerColor = onlineGameData.playerColor; // 'white' 또는 'black'
-  const roomCode = onlineGameData.roomCode;
-  const opponent = onlineGameData.opponent;
+  // URL 파라미터에서 온라인 게임 정보 가져오기
+  const searchParams = new URLSearchParams(location.search);
+  const isOnlineGame = searchParams.get('mode') === 'online';
+  const roomCode = searchParams.get('roomCode');
+  const playerName = searchParams.get('playerName');
+  const playerColor = searchParams.get('playerColor');
+  const opponent = searchParams.get('opponent');
 
+  // 기본 게임 상태
   const [board, setBoard] = useState(initialBoard);
   const [selectedPos, setSelectedPos] = useState(null);
   const [currentTurn, setCurrentTurn] = useState('white');
@@ -39,93 +53,12 @@ const ClassicBoard = () => {
   const [promotion, setPromotion] = useState(null);
   const [lastMove, setLastMove] = useState(null);
   const [gameStarted, setGameStarted] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('connecting');
 
-  // 온라인 게임 소켓 설정
-  useEffect(() => {
-    if (isOnlineGame && onlineGameData.socketId) {
-      const socket = io('http://localhost:3001', {
-        transports: ['websocket', 'polling']
-      });
-      
-      socketRef.current = socket;
-
-      socket.on('connect', () => {
-        console.log('게임 화면에서 소켓 연결됨');
-        setConnectionStatus('connected');
-        
-        // 방에 재입장
-        socket.emit('rejoin-game', { roomCode });
-      });
-
-      // 상대방 이동 수신
-      socket.on('opponent-move', (moveData) => {
-        console.log('상대방 이동 수신:', moveData);
-        applyOpponentMove(moveData);
-      });
-
-      // 게임 상태 동기화
-      socket.on('game-sync', (gameData) => {
-        console.log('게임 상태 동기화:', gameData);
-        syncGameState(gameData);
-      });
-
-      // 상대방 연결 해제
-      socket.on('opponent-disconnected', () => {
-        alert('상대방이 연결을 해제했습니다.');
-        navigate('/');
-      });
-
-      socket.on('connect_error', () => {
-        setConnectionStatus('error');
-      });
-
-      return () => {
-        socket.disconnect();
-      };
-    }
-  }, [isOnlineGame, onlineGameData, roomCode, navigate]);
-
-  // 상대방 이동 적용
-  const applyOpponentMove = (moveData) => {
-    const { board: newBoard, currentTurn: newTurn, message: newMessage, 
-            whiteMoveCount: newWhiteCount, blackMoveCount: newBlackCount,
-            hasMoved: newHasMoved, enPassantTarget: newEnPassant, lastMove: newLastMove } = moveData;
-    
-    setBoard(newBoard);
-    setCurrentTurn(newTurn);
-    setMessage(newMessage);
-    setWhiteMoveCount(newWhiteCount);
-    setBlackMoveCount(newBlackCount);
-    setHasMoved(newHasMoved);
-    setEnPassantTarget(newEnPassant);
-    setLastMove(newLastMove);
-    
-    playMoveSound();
-    
-    // 체크/체크메이트 사운드
-    if (newMessage.includes('체크메이트')) {
-      playCheckmateSound();
-    } else if (newMessage.includes('체크')) {
-      playCheckSound();
-    }
-  };
-
-  // 게임 상태 동기화
-  const syncGameState = (gameData) => {
-    setBoard(gameData.board);
-    setCurrentTurn(gameData.currentTurn);
-    setMessage(gameData.message);
-    setWhiteMoveCount(gameData.whiteMoveCount);
-    setBlackMoveCount(gameData.blackMoveCount);
-    setHasMoved(gameData.hasMoved);
-    setEnPassantTarget(gameData.enPassantTarget);
-    setLastMove(gameData.lastMove);
-    setGameOver(gameData.gameOver);
-  };
+  // 온라인 게임 상태
+  const [onlineState, setOnlineState] = useState(getInitialOnlineGameState());
 
   // 체크 해소 여부를 검증하는 함수
-  const wouldMoveResolveCheck = (selectedPiece, fromRow, fromCol, toRow, toCol, currentBoard, currentTurn) => {
+  const wouldMoveResolveCheck = (selectedPiece, fromRow, fromCol, toRow, toCol, currentBoard, turn) => {
     const tempBoard = currentBoard.map(row => [...row]);
     
     const capturedPiece = tempBoard[toRow][toCol];
@@ -133,7 +66,7 @@ const ClassicBoard = () => {
     tempBoard[fromRow][fromCol] = null;
     
     if (selectedPiece.type === 'pawn' && Math.abs(fromCol - toCol) === 1 && !capturedPiece) {
-      const capturedPawnRow = currentTurn === 'white' ? toRow + 1 : toRow - 1;
+      const capturedPawnRow = turn === 'white' ? toRow + 1 : toRow - 1;
       tempBoard[capturedPawnRow][toCol] = null;
     }
     
@@ -147,80 +80,252 @@ const ClassicBoard = () => {
       }
     }
     
-    return !isKingInCheck(tempBoard, currentTurn);
+    return !isKingInCheck(tempBoard, turn);
+  };
+
+  // 온라인 게임 초기화
+  useEffect(() => {
+    if (isOnlineGame && roomCode && playerName) {
+      initializeOnlineGame();
+    } else if (!isOnlineGame) {
+      // 오프라인 게임 초기화
+      setGameStarted(true);
+      setMessage('백 턴');
+    }
+
+    return () => {
+      if (isOnlineGame) {
+        socketManager.leaveRoom();
+      }
+    };
+  }, [isOnlineGame, roomCode, playerName]);
+
+  const initializeOnlineGame = async () => {
+    try {
+      setOnlineState(prev => ({ 
+        ...prev, 
+        connectionStatus: 'connecting',
+        roomCode,
+        playerName,
+        playerColor
+      }));
+
+      await socketManager.connect();
+      
+      setOnlineState(prev => ({ 
+        ...prev, 
+        isConnected: true,
+        connectionStatus: 'connected'
+      }));
+
+      // 소켓 이벤트 리스너 설정
+      setupSocketListeners();
+
+      // 방에 재입장 (이미 방이 생성된 상태)
+      if (playerColor === 'white') {
+        // 방장인 경우 - 이미 방이 생성되어 있음
+        setOnlineState(prev => ({ 
+          ...prev, 
+          isInRoom: true,
+          waitingForOpponent: true
+        }));
+      } else {
+        // 참가자인 경우 - 방에 입장 시도
+        await socketManager.joinRoom(roomCode, playerName);
+        setOnlineState(prev => ({ 
+          ...prev, 
+          isInRoom: true,
+          opponent,
+          waitingForOpponent: false
+        }));
+      }
+
+    } catch (error) {
+      console.error('온라인 게임 초기화 실패:', error);
+      alert('온라인 게임 연결에 실패했습니다: ' + error.message);
+      navigate('/');
+    }
+  };
+
+  const setupSocketListeners = () => {
+    socketManager.setupGameListeners({
+      onGameStart: (data) => {
+        console.log('게임 시작:', data);
+        setGameStarted(true);
+        setOnlineState(prev => ({
+          ...prev,
+          gameStarted: true,
+          waitingForOpponent: false,
+          opponent: data.players ? 
+            (playerColor === 'white' ? data.players.black : data.players.white) : 
+            prev.opponent
+        }));
+        setMessage('백 턴');
+      },
+
+      onOpponentMove: (moveData) => {
+        console.log('상대방 이동 수신:', moveData);
+        const newGameState = applyOpponentMove({
+          board,
+          currentTurn,
+          message,
+          gameOver,
+          hasMoved,
+          enPassantTarget,
+          lastMove,
+          whiteMoveCount,
+          blackMoveCount
+        }, moveData);
+
+        // 상태 업데이트
+        setBoard(newGameState.board);
+        setCurrentTurn(newGameState.currentTurn);
+        setMessage(newGameState.message);
+        setGameOver(newGameState.gameOver);
+        setHasMoved(newGameState.hasMoved);
+        setEnPassantTarget(newGameState.enPassantTarget);
+        setLastMove(newGameState.lastMove);
+        setWhiteMoveCount(newGameState.whiteMoveCount);
+        setBlackMoveCount(newGameState.blackMoveCount);
+        setSelectedPos(null);
+        setLegalMoves([]);
+
+        // 게임 종료 처리
+        if (newGameState.gameOver) {
+          setTimeout(() => {
+            navigate('/gameover', { 
+              state: { 
+                winner: newGameState.winner,
+                gameType: 'online'
+              } 
+            });
+          }, 1500);
+        }
+      },
+
+      onGameSync: (gameData) => {
+        console.log('게임 상태 동기화:', gameData);
+        setBoard(gameData.board || board);
+        setCurrentTurn(gameData.currentTurn || currentTurn);
+        setMessage(gameData.message || message);
+        setGameOver(gameData.gameOver || false);
+        setHasMoved(gameData.hasMoved || hasMoved);
+        setEnPassantTarget(gameData.enPassantTarget || null);
+        setLastMove(gameData.lastMove || null);
+        setWhiteMoveCount(gameData.whiteMoveCount || 0);
+        setBlackMoveCount(gameData.blackMoveCount || 0);
+        setGameStarted(gameData.gameStarted || false);
+      },
+
+      onOpponentJoined: (data) => {
+        console.log('상대방 입장:', data);
+        setOnlineState(prev => ({
+          ...prev,
+          opponent: data.opponentName,
+          waitingForOpponent: false
+        }));
+        setMessage('게임이 곧 시작됩니다...');
+      },
+
+      onOpponentDisconnected: () => {
+        alert('상대방이 연결을 해제했습니다.');
+        navigate('/');
+      },
+
+      onOpponentSurrendered: (data) => {
+        setGameOver(true);
+        setMessage(`${data.playerName} 항복`);
+        playGameOverSound();
+        setTimeout(() => {
+          const winner = playerColor === 'white' ? '백' : '흑';
+          navigate('/gameover', { 
+            state: { 
+              winner,
+              gameType: 'online'
+            } 
+          });
+        }, 1000);
+      },
+
+      onGameEnd: (data) => {
+        setGameOver(true);
+        if (data.reason === 'timeout') {
+          const winner = data.winner === 'white' ? '백' : '흑';
+          setMessage(`시간 초과! ${winner} 승리`);
+          playGameOverSound();
+          setTimeout(() => {
+            navigate('/gameover', { 
+              state: { 
+                winner,
+                gameType: 'online'
+              } 
+            });
+          }, 1000);
+        }
+      }
+    });
   };
 
   // 항복 처리
   const handleSurrender = () => {
-    if (gameOver) return;
+    if (gameOver || !gameStarted) return;
     
-    if (isOnlineGame && socketRef.current) {
-      socketRef.current.emit('surrender', { roomCode, playerColor });
+    if (isOnlineGame) {
+      socketManager.surrender();
+    } else {
+      const winner = currentTurn === 'white' ? '흑' : '백';
+      setGameOver(true);
+      setMessage(`${winner} 승리 (항복)`);
+      navigate('/gameover', { state: { winner, gameType: 'classic' } });
     }
-    
-    const winner = currentTurn === 'white' ? '흑' : '백';
-    setGameOver(true);
-    setMessage(`${winner} 승리 (항복)`);
-    navigate('/gameover', { state: { winner, gameType: 'classic' } });
   };
-
-  // 게임 상태 체크용 메시지에서 승자 추출
-  const getWinnerName = (msg) => {
-    if (msg.includes('백')) return '백';
-    if (msg.includes('흑')) return '흑';
-    return '무승부';
-  };
-
-  // 메시지 변화에 따른 게임 종료 처리
-  useEffect(() => {
-    if (message.includes('체크메이트')) {
-      playCheckmateSound();
-      setTimeout(() => {
-        const winner = getWinnerName(message);
-        navigate('/gameover', { state: { winner, gameType: 'classic' } });
-      }, 1000);
-    } else if (message.includes('스테일메이트')) {
-      playStalemateSound();
-      setTimeout(() => {
-        navigate('/gameover', { state: { winner: '무승부', gameType: 'classic' } });
-      }, 1000);
-    } else if (message.includes('항복') || message.includes('시간 초과')) {
-      setTimeout(() => {
-        const winner = getWinnerName(message);
-        navigate('/gameover', { state: { winner, gameType: 'classic' } });
-      }, 1000);
-    }
-  }, [message, navigate]);
 
   // 시간 초과 처리
   const handleTimeOut = (color) => {
     if (gameOver) return;
     
-    if (isOnlineGame && socketRef.current) {
-      socketRef.current.emit('timeout', { roomCode, color });
+    if (isOnlineGame) {
+      socketManager.timeOut(color);
+    } else {
+      playGameOverSound();
+      setGameOver(true);
+      const winner = color === 'white' ? '흑' : '백';
+      setMessage(`시간 초과! ${winner} 승리`);
+      navigate('/gameover', { state: { winner, gameType: 'classic' } });
     }
-    
-    playGameOverSound();
-    setGameOver(true);
-    const winner = color === 'white' ? '흑' : '백';
-    setMessage(`시간 초과! ${winner} 승리`);
-    navigate('/gameover', { state: { winner, gameType: 'classic' } });
   };
 
   // 클릭 처리 함수
   const handleClick = (row, col) => {
-    if (gameOver || promotion) return;
+    if (gameOver || promotion || !gameStarted) return;
     
-    // 온라인 게임에서는 자신의 턴과 색깔만 조작 가능
-    if (isOnlineGame && currentTurn !== playerColor) {
-      console.log('상대방 턴입니다!');
+    // 온라인 게임에서 대기 중이면 클릭 무시
+    if (isOnlineGame && onlineState.waitingForOpponent) {
       return;
     }
 
-    const clickedPiece = board[row][col];
+    // 좌표 변환 (온라인 게임에서 플레이어 색깔에 따라)
+    let actualRow = row;
+    let actualCol = col;
+    
+    if (isOnlineGame && playerColor === 'black') {
+      actualRow = 7 - row;
+      actualCol = 7 - col;
+    }
+
+    const clickedPiece = board[actualRow][actualCol];
+
+    // 온라인 게임에서 턴과 색깔 검증
+    if (isOnlineGame) {
+      const validation = validateOnlineMove(board, actualRow, actualCol, actualRow, actualCol, currentTurn, playerColor);
+      if (!validation.valid && selectedPos === null) {
+        console.log('온라인 게임 검증 실패:', validation.error);
+        return;
+      }
+    }
 
     // 선택된 칸 다시 클릭하면 선택 해제
-    if (selectedPos && selectedPos.row === row && selectedPos.col === col) {
+    if (selectedPos && selectedPos.row === actualRow && selectedPos.col === actualCol) {
       setSelectedPos(null);
       setLegalMoves([]);
       return;
@@ -242,11 +347,11 @@ const ClassicBoard = () => {
         }
 
         // 유효한 말 선택
-        setSelectedPos({ row, col });
+        setSelectedPos({ row: actualRow, col: actualCol });
         
-        const basicLegalMoves = getLegalMoves(clickedPiece, row, col, board, enPassantTarget, hasMoved);
+        const basicLegalMoves = getLegalMoves(clickedPiece, actualRow, actualCol, board, enPassantTarget, hasMoved);
         const filteredLegalMoves = basicLegalMoves.filter(move => {
-          return wouldMoveResolveCheck(clickedPiece, row, col, move.row, move.col, board, currentTurn);
+          return wouldMoveResolveCheck(clickedPiece, actualRow, actualCol, move.row, move.col, board, currentTurn);
         });
         
         setLegalMoves(filteredLegalMoves);
@@ -258,14 +363,14 @@ const ClassicBoard = () => {
     const selectedPiece = board[selectedPos.row][selectedPos.col];
 
     // 이동 유효성 검사
-    const basicMoveValid = isValidMove(selectedPiece, selectedPos.row, selectedPos.col, row, col, board, enPassantTarget, hasMoved);
+    const basicMoveValid = isValidMove(selectedPiece, selectedPos.row, selectedPos.col, actualRow, actualCol, board, enPassantTarget, hasMoved);
     
     if (basicMoveValid) {
       // 체크 해소 검증
       const isCurrentlyInCheck = isKingInCheck(board, currentTurn);
       
       if (isCurrentlyInCheck) {
-        const wouldResolveCheck = wouldMoveResolveCheck(selectedPiece, selectedPos.row, selectedPos.col, row, col, board, currentTurn);
+        const wouldResolveCheck = wouldMoveResolveCheck(selectedPiece, selectedPos.row, selectedPos.col, actualRow, actualCol, board, currentTurn);
         
         if (!wouldResolveCheck) {
           console.log('❌ 체크 상태를 해소하지 못하는 이동입니다!');
@@ -274,7 +379,7 @@ const ClassicBoard = () => {
           return;
         }
       } else {
-        const wouldCauseCheck = !wouldMoveResolveCheck(selectedPiece, selectedPos.row, selectedPos.col, row, col, board, currentTurn);
+        const wouldCauseCheck = !wouldMoveResolveCheck(selectedPiece, selectedPos.row, selectedPos.col, actualRow, actualCol, board, currentTurn);
         
         if (wouldCauseCheck) {
           console.log('❌ 이동 후 자신의 킹이 체크에 빠집니다!');
@@ -290,34 +395,28 @@ const ClassicBoard = () => {
         selectedPiece,
         fromRow: selectedPos.row,
         fromCol: selectedPos.col,
-        toRow: row,
-        toCol: col,
+        toRow: actualRow,
+        toCol: actualCol,
         enPassantTarget,
         hasMoved,
         currentTurn
       });
 
-      // 게임 시작 표시
-      if (!gameStarted) {
-        setGameStarted(true);
-      }
-
       // 마지막 이동 정보 업데이트
       const newLastMove = {
         from: { row: selectedPos.row, col: selectedPos.col },
-        to: { row, col }
+        to: { row: actualRow, col: actualCol }
       };
-      setLastMove(newLastMove);
 
       playMoveSound();
 
       // 폰 프로모션 체크
       const promotionRow = selectedPiece.color === 'white' ? 0 : 7;
-      const isPawnPromotion = selectedPiece.type === 'pawn' && row === promotionRow;
+      const isPawnPromotion = selectedPiece.type === 'pawn' && actualRow === promotionRow;
 
       if (isPawnPromotion) {
         setBoard(moveResult.newBoard);
-        setPromotion({ row, col, color: selectedPiece.color });
+        setPromotion({ row: actualRow, col: actualCol, color: selectedPiece.color });
         setSelectedPos(null);
         setLegalMoves([]);
         setHasMoved(moveResult.newHasMoved);
@@ -327,66 +426,79 @@ const ClassicBoard = () => {
 
       // 게임 상태 업데이트
       const nextTurn = currentTurn === 'white' ? 'black' : 'white';
-      
-      if (currentTurn === 'white') setWhiteMoveCount(c => c + 1);
-      else setBlackMoveCount(c => c + 1);
+      const newWhiteCount = currentTurn === 'white' ? whiteMoveCount + 1 : whiteMoveCount;
+      const newBlackCount = currentTurn === 'black' ? blackMoveCount + 1 : blackMoveCount;
 
-      // 체크 상태 판단
-      const whiteInCheck = isKingInCheck(moveResult.newBoard, 'white');
-      const blackInCheck = isKingInCheck(moveResult.newBoard, 'black');
-      const whiteCheckmate = isCheckmate(moveResult.newBoard, 'white');
-      const blackCheckmate = isCheckmate(moveResult.newBoard, 'black');
-      const whiteStalemate = isStalemate(moveResult.newBoard, 'white');
-      const blackStalemate = isStalemate(moveResult.newBoard, 'black');
-      
-      if ((whiteInCheck && !whiteCheckmate && !whiteStalemate) || (blackInCheck && !blackCheckmate && !blackStalemate)) {
-        playCheckSound();
-      }
+      // 게임 상태 확인
+      const gameStateUpdate = updateGameState(moveResult, currentTurn, gameOver);
 
-      let statusMsg = '';
-      let gameFinished = false;
-
-      if (whiteCheckmate) {
-        statusMsg = '체크메이트: 흑 승';
-        gameFinished = true;
-      } else if (blackCheckmate) {
-        statusMsg = '체크메이트: 백 승';
-        gameFinished = true;
-      } else if (whiteStalemate || blackStalemate) {
-        statusMsg = '스테일메이트';
-        gameFinished = true;
-      } else if (whiteInCheck || blackInCheck) {
-        statusMsg = whiteInCheck ? '백 체크 중' : '흑 체크 중';
-      } else {
-        statusMsg = `${nextTurn === 'white' ? '백' : '흑'} 턴`;
-      }
-
-      // 모든 상태 업데이트
+      // 로컬 상태 업데이트
       setBoard(moveResult.newBoard);
       setSelectedPos(null);
       setLegalMoves([]);
-      setCurrentTurn(nextTurn);
-      setMessage(statusMsg);
-      setGameOver(gameFinished);
+      setCurrentTurn(gameStateUpdate.nextTurn);
+      setMessage(gameStateUpdate.message);
+      setGameOver(gameStateUpdate.gameOver);
       setHasMoved(moveResult.newHasMoved);
       setEnPassantTarget(moveResult.newEnPassantTarget);
+      setLastMove(newLastMove);
+      setWhiteMoveCount(newWhiteCount);
+      setBlackMoveCount(newBlackCount);
+
+      // 사운드 재생
+      switch (gameStateUpdate.sound) {
+        case 'checkmate':
+          playCheckmateSound();
+          break;
+        case 'stalemate':
+          playStalemateSound();
+          break;
+        case 'check':
+          playCheckSound();
+          break;
+        case 'gameOver':
+          playGameOverSound();
+          break;
+        default:
+          // move 사운드는 이미 재생됨
+          break;
+      }
 
       // 온라인 게임에서 상대방에게 이동 전송
-      if (isOnlineGame && socketRef.current) {
-        const moveData = {
-          roomCode,
+      if (isOnlineGame) {
+        const moveData = createMoveData({
           board: moveResult.newBoard,
-          currentTurn: nextTurn,
-          message: statusMsg,
-          whiteMoveCount: currentTurn === 'white' ? whiteMoveCount + 1 : whiteMoveCount,
-          blackMoveCount: currentTurn === 'black' ? blackMoveCount + 1 : blackMoveCount,
+          currentTurn: gameStateUpdate.nextTurn,
+          message: gameStateUpdate.message,
+          gameOver: gameStateUpdate.gameOver,
+          winner: gameStateUpdate.winner,
           hasMoved: moveResult.newHasMoved,
           enPassantTarget: moveResult.newEnPassantTarget,
-          lastMove: newLastMove,
-          gameOver: gameFinished
-        };
+          lastMove: newLastMove
+        }, {
+          fromRow: selectedPos.row,
+          fromCol: selectedPos.col,
+          toRow: actualRow,
+          toCol: actualCol,
+          piece: selectedPiece
+        }, {
+          white: newWhiteCount,
+          black: newBlackCount
+        });
         
-        socketRef.current.emit('player-move', moveData);
+        socketManager.sendMove(moveData);
+      }
+
+      // 게임 종료 처리
+      if (gameStateUpdate.gameOver) {
+        setTimeout(() => {
+          navigate('/gameover', { 
+            state: { 
+              winner: gameStateUpdate.winner,
+              gameType: isOnlineGame ? 'online' : 'classic'
+            } 
+          });
+        }, 1500);
       }
 
     } else {
@@ -399,11 +511,11 @@ const ClassicBoard = () => {
           return;
         }
         
-        setSelectedPos({ row, col });
+        setSelectedPos({ row: actualRow, col: actualCol });
         
-        const basicLegalMoves = getLegalMoves(clickedPiece, row, col, board, enPassantTarget, hasMoved);
+        const basicLegalMoves = getLegalMoves(clickedPiece, actualRow, actualCol, board, enPassantTarget, hasMoved);
         const filteredLegalMoves = basicLegalMoves.filter(move => {
-          return wouldMoveResolveCheck(clickedPiece, row, col, move.row, move.col, board, currentTurn);
+          return wouldMoveResolveCheck(clickedPiece, actualRow, actualCol, move.row, move.col, board, currentTurn);
         });
         
         setLegalMoves(filteredLegalMoves);
@@ -428,17 +540,7 @@ const ClassicBoard = () => {
     setCurrentTurn(nextTurn);
     setMessage(`${nextTurn === 'white' ? '백' : '흑'} 턴`);
 
-    // 온라인 게임에서 프로모션 정보도 전송
-    if (isOnlineGame && socketRef.current) {
-      socketRef.current.emit('promotion', { 
-        roomCode, 
-        row, 
-        col, 
-        newType, 
-        board: newBoard, 
-        currentTurn: nextTurn 
-      });
-    }
+    // 온라인 게임에서 프로모션 정보도 전송 (필요시 구현)
   };
 
   // 렌더링용 보드 생성 (플레이어 색깔에 따라 회전)
@@ -450,46 +552,33 @@ const ClassicBoard = () => {
     }
   };
 
-  // 좌표 변환 (회전된 보드용)
-  const transformCoordinates = (row, col) => {
-    if (!isOnlineGame || playerColor === 'white') {
-      return { row, col };
-    } else {
-      return { row: 7 - row, col: 7 - col };
-    }
+  // 하이라이트 위치 변환
+  const getTransformedLegalMoves = () => {
+    return transformHighlightsForPlayer(legalMoves, isOnlineGame ? playerColor : 'white');
   };
 
-  // 하이라이트 위치 변환
-  const transformHighlights = (moves) => {
+  // 선택된 위치 변환
+  const getTransformedSelectedPos = () => {
+    if (!selectedPos) return null;
     if (!isOnlineGame || playerColor === 'white') {
-      return moves;
+      return selectedPos;
     } else {
-      return moves.map(move => ({
-        row: 7 - move.row,
-        col: 7 - move.col
-      }));
+      return { row: 7 - selectedPos.row, col: 7 - selectedPos.col };
     }
   };
 
   // 마지막 이동 위치 변환
   const getTransformedLastMove = () => {
-    if (!lastMove) return null;
-    if (!isOnlineGame || playerColor === 'white') {
-      return lastMove;
-    } else {
-      return {
-        from: { row: 7 - lastMove.from.row, col: 7 - lastMove.from.col },
-        to: { row: 7 - lastMove.to.row, col: 7 - lastMove.to.col }
-      };
-    }
+    return transformLastMoveForPlayer(lastMove, isOnlineGame ? playerColor : 'white');
   };
 
   const renderBoard = getRenderBoard();
-  const transformedLegalMoves = transformHighlights(legalMoves);
-  const transformedSelectedPos = selectedPos && (!isOnlineGame || playerColor === 'white') ? 
-    selectedPos : 
-    selectedPos ? { row: 7 - selectedPos.row, col: 7 - selectedPos.col } : null;
+  const transformedLegalMoves = getTransformedLegalMoves();
+  const transformedSelectedPos = getTransformedSelectedPos();
   const transformedLastMove = getTransformedLastMove();
+
+  // 연결 상태 메시지
+  const connectionStatusText = isOnlineGame ? getConnectionStatusMessage(onlineState) : '';
 
   return (
     <div className="main-container">
@@ -519,13 +608,34 @@ const ClassicBoard = () => {
               marginBottom: '10px'
             }}
           >
-            클래식 체스 {isOnlineGame && `- ${playerColor === 'white' ? '흰색' : '검은색'} 플레이어`}
+            {isOnlineGame ? '온라인 클래식 체스' : '클래식 체스'}
           </h1>
 
           {isOnlineGame && (
             <div style={{ color: 'white', marginBottom: '10px' }}>
-              <p>상대방: {opponent}</p>
-              <p>방 코드: {roomCode}</p>
+              <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', alignItems: 'center' }}>
+                <div>
+                  <strong>{playerColor === 'white' ? '🤍' : '🖤'} 나: {playerName}</strong>
+                </div>
+                <div>
+                  <strong>{playerColor === 'white' ? '🖤' : '🤍'} 상대: {onlineState.opponent || '대기중'}</strong>
+                </div>
+              </div>
+              <div style={{ fontSize: '0.9rem', marginTop: '5px' }}>
+                방 코드: <strong>{roomCode}</strong>
+              </div>
+            </div>
+          )}
+
+          {/* 연결/게임 상태 표시 */}
+          {connectionStatusText && (
+            <div style={{ 
+              color: '#ffd700', 
+              fontSize: '1.1rem', 
+              fontWeight: 'bold',
+              marginBottom: '10px'
+            }}>
+              {connectionStatusText}
             </div>
           )}
 
@@ -567,15 +677,16 @@ const ClassicBoard = () => {
 
             <button
               onClick={handleSurrender}
-              disabled={gameOver}
+              disabled={gameOver || !gameStarted || (isOnlineGame && onlineState.waitingForOpponent)}
               style={{
                 padding: '6px 12px',
                 fontWeight: 'bold',
                 borderRadius: '6px',
                 border: '1px solid #aaa',
                 backgroundColor: '#fff',
-                cursor: gameOver ? 'not-allowed' : 'pointer',
+                cursor: (gameOver || !gameStarted || (isOnlineGame && onlineState.waitingForOpponent)) ? 'not-allowed' : 'pointer',
                 fontSize: '0.9rem',
+                opacity: (gameOver || !gameStarted || (isOnlineGame && onlineState.waitingForOpponent)) ? 0.5 : 1
               }}
             >
               항복
@@ -583,7 +694,7 @@ const ClassicBoard = () => {
           </div>
         </div>
 
-        {/* 단일 체스보드 */}
+        {/* 체스보드와 타이머 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           {/* 타이머 */}
           <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'white' }}>
@@ -591,8 +702,8 @@ const ClassicBoard = () => {
               currentTurn={currentTurn} 
               onTimeOut={handleTimeOut} 
               gameOver={gameOver}
-              color={playerColor || 'white'}
-              gameStarted={gameStarted}
+              color={isOnlineGame ? playerColor : 'white'}
+              gameStarted={gameStarted && (!isOnlineGame || !onlineState.waitingForOpponent)}
             />
           </div>
 
@@ -614,13 +725,9 @@ const ClassicBoard = () => {
                     key={`${rowIdx}-${colIdx}`}
                     color={color}
                     piece={piece}
-                    onClick={() => {
-                      const transformed = transformCoordinates(rowIdx, colIdx);
-                      handleClick(transformed.row, transformed.col);
-                    }}
+                    onClick={() => handleClick(rowIdx, colIdx)}
                     highlight={isSelected}
                     isMoveOption={isHighlighted}
-                    isRotated={isOnlineGame && playerColor === 'black'}
                     isLastMove={isLastMovePos && !isSelected}
                   />
                 );
@@ -629,25 +736,44 @@ const ClassicBoard = () => {
           </div>
         </div>
 
-        {/* 플레이어 관점 표시 */}
-        {isOnlineGame && (
-          <div style={{ 
-            marginTop: '15px', 
-            color: 'white', 
-            fontSize: '1.1rem', 
-            fontWeight: 'bold',
-            textShadow: '1px 1px 2px black'
-          }}>
-            {playerColor === 'white' ? '🤍 흰색 플레이어 관점' : '🖤 검은색 플레이어 관점'}
-          </div>
-        )}
-
-        {/* 프로모션 UI */}
+        {/* 프로모션 모달 */}
         {promotion && (
           <PromotionModal
             promotion={promotion}
             onPromotionChoice={handlePromotionChoice}
           />
+        )}
+
+        {/* 하단 버튼들 */}
+        {isOnlineGame && (
+          <div style={{ marginTop: '18px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <button
+              onClick={() => {
+                const syncData = createSyncData({
+                  board,
+                  currentTurn,
+                  message,
+                  gameOver,
+                  hasMoved,
+                  enPassantTarget,
+                  lastMove,
+                  whiteMoveCount,
+                  blackMoveCount,
+                  gameStarted
+                });
+                socketManager.requestSync(syncData);
+              }}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 8,
+                border: '1px solid #ddd',
+                background: '#fff',
+                cursor: 'pointer'
+              }}
+            >
+              동기화 요청
+            </button>
+          </div>
         )}
       </div>
     </div>
